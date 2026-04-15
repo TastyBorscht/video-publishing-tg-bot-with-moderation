@@ -1,0 +1,42 @@
+{
+  "_comment": "Localization file for bot messages. Add translations here. If a key is missing, the default message from code will be used.",
+
+  "welcome_message": "Welcome to the Video Submission Bot!\n\nSend me a video to submit it for publication.",
+  "send_video_prompt": "Please send a video file",
+
+  "choose_publication_type": "Как запостить твой кринж?:",
+  "video_sent_to_moderation": "Your video has been sent.",
+
+  "video_approved_queued": "Your video has been approved and added to the publication queue.",
+  "video_not_approved": "Your video was not approved for publication.",
+  "video_published": "Your video has been published.",
+  "video_scheduled": "Your video has been scheduled for publication on {scheduled_time}.",
+
+  "unauthorized_action": "You are not authorized to perform this action.",
+  "video_not_found": "Video not found in database",
+  "video_already_processed": "This video has already been processed",
+  "video_already_published_or_rejected": "This video has already been published or rejected",
+
+  "no_pending_videos": "ℹ️ No pending videos to approve.",
+  "approve_all_summary": "✅ Approved {approved_count} video(s)",
+  "approve_all_summary_with_failures": "✅ Approved {approved_count} video(s)\n❌ Failed to approve {failed_count} video(s)",
+  "unauthorized_command": "❌ You are not authorized to use this command.",
+
+  "schedule_menu_title": "⏰ Schedule video {video_id} for publication\nCurrent time: {current_time}\n\nChoose scheduling method:",
+  "schedule_quick_title": "⚡ Quick Schedule - Video {video_id}\nSelect time from now:",
+  "schedule_choose_date_title": "📅 Choose Date - Video {video_id}\nSelect a date:",
+  "schedule_choose_time_title": "🕐 Choose Time - Video {video_id}\nDate: {date}\nSelect a time:",
+  "schedule_time_in_past": "Selected time is in the past. Please choose a future time.",
+
+  "button_publish_publicly": "Publish publicly",
+  "button_publish_anonymously": "Publish anonymously",
+  "button_approve": "Approve",
+  "button_reject": "Reject",
+  "button_schedule": "Schedule",
+  "button_publish_now": "Publish now",
+  "button_edit_cancel": "🔄 Edit/Cancel",
+  "button_quick_schedule": "⚡ Quick Schedule",
+  "button_choose_date": "📅 Choose Date",
+  "button_cancel": "❌ Cancel",
+  "button_back": "⬅️ Back"
+}
