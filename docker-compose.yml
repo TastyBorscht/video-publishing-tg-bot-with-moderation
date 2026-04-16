@@ -2,9 +2,7 @@ version: '3.8'
 
 services:
   publisher_bot:
-    build:
-      context: .
-      dockerfile: Dockerfile
+    image: tastyborscht/publisher_bot:latest
     container_name: publisher_bot
     restart: unless-stopped
 
