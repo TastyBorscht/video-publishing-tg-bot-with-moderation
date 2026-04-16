@@ -57,6 +57,14 @@ async def handle_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(t("send_video_prompt", "Please send a video file"))
         return
 
+    # Check if user is blacklisted
+    if await db.is_blacklisted(user.id):
+        await update.message.reply_text(
+            t("user_blacklisted", "❌ You are not allowed to submit videos.")
+        )
+        logger.info(f"Blacklisted user {user.id} attempted to submit video")
+        return
+
     # Store video in database with pending status
     video_id = await db.insert_video(
         file_id=video.file_id,
@@ -147,7 +155,7 @@ async def handle_publication_choice(update: Update, context: ContextTypes.DEFAUL
     is_anonymous = (pub_type == "anon")
     await db.update_status(video_id, "pending", is_anonymous=is_anonymous)
 
-    # Prepare caption
+    # Prepare caption for moderation group (includes user ID)
     if is_anonymous:
         caption = "Video from anonymous user"
     else:
@@ -156,12 +164,16 @@ async def handle_publication_choice(update: Update, context: ContextTypes.DEFAUL
             username = f"@{username}" if username else username
         caption = f"Video from user {username}"
 
+    # Add user ID for moderators (visible only in moderation group)
+    moderation_caption = f"{caption}\n\n👤 User ID: `{video['user_id']}`"
+
     # Forward to moderation group
     try:
         sent_message = await context.bot.send_video(
             chat_id=config.MODERATION_GROUP_ID,
             video=video["file_id"],
-            caption=caption
+            caption=moderation_caption,
+            parse_mode='Markdown'
         )
 
         # Add moderation buttons
@@ -294,7 +306,7 @@ async def moderate_edit_cancel(query, context: ContextTypes.DEFAULT_TYPE, video:
         # Reset status to pending
         await db.update_status(video_id, "pending", scheduled_time=None)
 
-        # Get the original caption (remove status messages)
+        # Get the original caption (remove status messages, keep user ID)
         if video['is_anonymous']:
             caption_base = "Video from anonymous user"
         else:
@@ -302,6 +314,9 @@ async def moderate_edit_cancel(query, context: ContextTypes.DEFAULT_TYPE, video:
             if username and not username.startswith("@"):
                 username = f"@{username}"
             caption_base = f"Video from user {username}"
+
+        # Add user ID for moderators
+        moderation_caption = f"{caption_base}\n\n👤 User ID: `{video['user_id']}`"
 
         # Restore original moderation buttons
         keyboard = [
@@ -317,8 +332,9 @@ async def moderate_edit_cancel(query, context: ContextTypes.DEFAULT_TYPE, video:
         reply_markup = InlineKeyboardMarkup(keyboard)
 
         await query.message.edit_caption(
-            caption=caption_base,
-            reply_markup=reply_markup
+            caption=moderation_caption,
+            reply_markup=reply_markup,
+            parse_mode='Markdown'
         )
 
         logger.info(f"Video {video_id} reset to pending - returned to moderation menu")
@@ -647,7 +663,7 @@ async def handle_schedule_time(update: Update, context: ContextTypes.DEFAULT_TYP
             scheduled_time=scheduled_time.replace(tzinfo=None).isoformat()
         )
 
-        # Update moderation message caption
+        # Update moderation message caption (keep User ID)
         # Get the current caption from the video record
         if video['is_anonymous']:
             caption_base = "Video from anonymous user"
@@ -657,6 +673,13 @@ async def handle_schedule_time(update: Update, context: ContextTypes.DEFAULT_TYP
                 username = f"@{username}"
             caption_base = f"Video from user {username}"
 
+        # Add User ID and scheduled time
+        moderation_caption = (
+            f"{caption_base}\n\n"
+            f"👤 User ID: `{video['user_id']}`\n\n"
+            f"📅 Scheduled for: {scheduled_time.strftime('%Y-%m-%d %H:%M %Z')}"
+        )
+
         # Add Edit/Cancel button
         keyboard = [[InlineKeyboardButton("🔄 Edit/Cancel", callback_data=f"mod_edit_{video_id}")]]
         reply_markup = InlineKeyboardMarkup(keyboard)
@@ -664,8 +687,9 @@ async def handle_schedule_time(update: Update, context: ContextTypes.DEFAULT_TYP
         await context.bot.edit_message_caption(
             chat_id=config.MODERATION_GROUP_ID,
             message_id=video["moderation_message_id"],
-            caption=f"{caption_base}\n\n📅 Scheduled for: {scheduled_time.strftime('%Y-%m-%d %H:%M %Z')}",
-            reply_markup=reply_markup
+            caption=moderation_caption,
+            reply_markup=reply_markup,
+            parse_mode='Markdown'
         )
 
         # Delete schedule menu
@@ -849,48 +873,80 @@ async def publish_video_to_channel(
 
 
 async def check_scheduled_videos(context: ContextTypes.DEFAULT_TYPE):
-    """Check and publish scheduled videos."""
+    """Check and publish scheduled videos with 30-minute delay for overdue videos."""
     now = datetime.now(config.TIMEZONE)
     videos = await db.get_scheduled_videos()
+
+    if not videos:
+        return
+
+    # Separate overdue and on-time videos
+    overdue_videos = []
 
     for video in videos:
         scheduled_time = datetime.fromisoformat(video["scheduled_time"])
         scheduled_time = config.TIMEZONE.localize(scheduled_time)
 
-        # Check if it's time to publish
-        if now >= scheduled_time:
-            logger.info(f"Publishing scheduled video {video['id']} (scheduled for {scheduled_time})")
-            success = await publish_video_to_channel(context, video)
+        time_diff = (now - scheduled_time).total_seconds()
 
-            if success:
-                await db.update_status(
-                    video["id"],
-                    "published",
-                    published_at=datetime.now()
+        if time_diff > 0:  # Video is overdue
+            overdue_videos.append((video, scheduled_time, time_diff))
+
+    # Sort overdue videos by scheduled time (oldest first)
+    overdue_videos.sort(key=lambda x: x[1])
+
+    # Handle overdue videos with 30-minute staggered publishing
+    if overdue_videos:
+        last_overdue_publish = context.bot_data.get('last_overdue_scheduled_publish')
+
+        if last_overdue_publish:
+            minutes_since_last = (now - last_overdue_publish).total_seconds() / 60
+            if minutes_since_last < 30:
+                logger.info(f"Waiting for 30-minute gap - last overdue video published {minutes_since_last:.1f} minutes ago")
+                return
+
+        # Publish the oldest overdue video
+        video, scheduled_time, time_overdue = overdue_videos[0]
+        hours_overdue = time_overdue / 3600
+
+        logger.info(f"Publishing overdue scheduled video {video['id']} (was scheduled for {scheduled_time}, {hours_overdue:.1f} hours late)")
+        success = await publish_video_to_channel(context, video)
+
+        if success:
+            await db.update_status(
+                video["id"],
+                "published",
+                published_at=datetime.now()
+            )
+
+            # Delete moderation message
+            try:
+                await context.bot.delete_message(
+                    chat_id=config.MODERATION_GROUP_ID,
+                    message_id=video["moderation_message_id"]
                 )
+                logger.info(f"Deleted moderation message {video['moderation_message_id']} for scheduled video {video['id']}")
+            except TelegramError as e:
+                logger.error(f"Error deleting moderation message {video['moderation_message_id']}: {e}")
 
-                # Delete moderation message
-                try:
-                    await context.bot.delete_message(
-                        chat_id=config.MODERATION_GROUP_ID,
-                        message_id=video["moderation_message_id"]
-                    )
-                    logger.info(f"Deleted moderation message {video['moderation_message_id']} for scheduled video {video['id']}")
-                except TelegramError as e:
-                    logger.error(f"Error deleting moderation message {video['moderation_message_id']}: {e}")
+            # Notify user
+            try:
+                await context.bot.send_message(
+                    chat_id=video["user_id"],
+                    text=t("video_published", "Your video has been published.")
+                )
+            except TelegramError as e:
+                logger.error(f"Failed to notify user {video['user_id']}: {e}")
 
-                # Notify user
-                try:
-                    await context.bot.send_message(
-                        chat_id=video["user_id"],
-                        text="Your video has been published."
-                    )
-                except TelegramError as e:
-                    logger.error(f"Failed to notify user {video['user_id']}: {e}")
+            # Record publish time
+            context.bot_data['last_overdue_scheduled_publish'] = now
+            logger.info(f"Scheduled video {video['id']} published")
 
-                logger.info(f"Scheduled video {video['id']} published")
-            else:
-                logger.error(f"Failed to publish scheduled video {video['id']}")
+            # Log remaining overdue videos
+            if len(overdue_videos) > 1:
+                logger.info(f"Still {len(overdue_videos) - 1} overdue scheduled video(s) waiting (30-minute gap between publications)")
+        else:
+            logger.error(f"Failed to publish scheduled video {video['id']}")
 
 
 # ============================================================================
@@ -987,6 +1043,172 @@ async def approve_all_command(update: Update, context: ContextTypes.DEFAULT_TYPE
         await update.message.reply_text(f"❌ Error approving videos: {str(e)}")
 
 
+async def blacklist_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle /b command - blacklist management."""
+    # Only work in moderation group
+    if update.message.chat_id != config.MODERATION_GROUP_ID:
+        return
+
+    # Check if user is moderator
+    if not is_moderator(update.message.from_user.id, update.message.chat_id):
+        await update.message.reply_text(t("unauthorized_command", "❌ You are not authorized to use this command."))
+        return
+
+    args = context.args if context.args else []
+
+    try:
+        # /b - Display blacklist
+        if len(args) == 0:
+            blacklist = await db.get_blacklist()
+            if not blacklist:
+                await update.message.reply_text(t("blacklist_empty", "📋 Blacklist is empty."))
+                return
+
+            # Format blacklist
+            message_lines = [t("blacklist_header", "📋 *Blacklisted Users:*\n")]
+            for entry in blacklist:
+                user_info = f"ID: `{entry['user_id']}`"
+                if entry['username']:
+                    user_info += f" (@{entry['username']})"
+                if entry['reason']:
+                    user_info += f"\n   Reason: {entry['reason']}"
+                added_at = entry['added_at'][:16] if entry['added_at'] else "Unknown"
+                user_info += f"\n   Added: {added_at}"
+                message_lines.append(user_info)
+
+            message = "\n\n".join(message_lines)
+            await update.message.reply_text(message, parse_mode='Markdown')
+            logger.info(f"Blacklist displayed by moderator {update.message.from_user.id}")
+
+        # /b clear all - Clear entire blacklist (with confirmation)
+        elif len(args) == 2 and args[0].lower() == "clear" and args[1].lower() == "all":
+            # Store confirmation state in context.user_data
+            context.user_data['pending_blacklist_clear'] = True
+
+            keyboard = [
+                [
+                    InlineKeyboardButton(t("button_confirm", "✅ Confirm"), callback_data="blacklist_clear_confirm"),
+                    InlineKeyboardButton(t("button_cancel", "❌ Cancel"), callback_data="blacklist_clear_cancel")
+                ]
+            ]
+            reply_markup = InlineKeyboardMarkup(keyboard)
+
+            await update.message.reply_text(
+                t("blacklist_clear_all_confirm",
+                  "⚠️ *WARNING*: This will remove ALL users from the blacklist.\n\nAre you sure?"),
+                reply_markup=reply_markup,
+                parse_mode='Markdown'
+            )
+
+        # /b clear <user_id> - Remove user from blacklist
+        elif len(args) == 2 and args[0].lower() == "clear":
+            try:
+                user_id = int(args[1])
+                was_blacklisted = await db.remove_from_blacklist(user_id)
+
+                if was_blacklisted:
+                    await update.message.reply_text(
+                        t("blacklist_user_removed", "✅ User `{user_id}` removed from blacklist.", user_id=user_id),
+                        parse_mode='Markdown'
+                    )
+                    logger.info(f"User {user_id} removed from blacklist by moderator {update.message.from_user.id}")
+                else:
+                    await update.message.reply_text(
+                        t("blacklist_user_not_found", "ℹ️ User `{user_id}` was not in the blacklist.", user_id=user_id),
+                        parse_mode='Markdown'
+                    )
+            except ValueError:
+                await update.message.reply_text(
+                    t("blacklist_invalid_user_id", "❌ Invalid user ID. Please provide a numeric user ID.")
+                )
+
+        # /b <user_id> [reason] - Add user to blacklist
+        elif len(args) >= 1:
+            try:
+                user_id = int(args[0])
+                reason = " ".join(args[1:]) if len(args) > 1 else None
+
+                # Check if already blacklisted
+                already_blacklisted = await db.is_blacklisted(user_id)
+
+                await db.add_to_blacklist(
+                    user_id=user_id,
+                    added_by=update.message.from_user.id,
+                    username=None,  # We don't have username info here
+                    reason=reason
+                )
+
+                if already_blacklisted:
+                    await update.message.reply_text(
+                        t("blacklist_user_updated", "✅ User `{user_id}` blacklist entry updated.", user_id=user_id),
+                        parse_mode='Markdown'
+                    )
+                else:
+                    await update.message.reply_text(
+                        t("blacklist_user_added", "✅ User `{user_id}` added to blacklist.", user_id=user_id),
+                        parse_mode='Markdown'
+                    )
+
+                logger.info(f"User {user_id} added to blacklist by moderator {update.message.from_user.id}")
+
+            except ValueError:
+                await update.message.reply_text(
+                    t("blacklist_invalid_user_id", "❌ Invalid user ID. Please provide a numeric user ID.")
+                )
+
+        else:
+            # Invalid command syntax
+            await update.message.reply_text(
+                t("blacklist_usage",
+                  "❌ Invalid syntax.\n\n"
+                  "*Usage:*\n"
+                  "`/b` - Show blacklist\n"
+                  "`/b <user_id>` - Add user\n"
+                  "`/b clear <user_id>` - Remove user\n"
+                  "`/b clear all` - Clear all"),
+                parse_mode='Markdown'
+            )
+
+    except Exception as e:
+        logger.error(f"Error in blacklist_command: {e}")
+        await update.message.reply_text(f"❌ Error: {str(e)}")
+
+
+async def handle_blacklist_clear_confirmation(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle blacklist clear all confirmation buttons."""
+    query = update.callback_query
+
+    # CRITICAL SECURITY CHECKS
+    if not is_moderator(query.from_user.id, query.message.chat_id):
+        await query.answer("You are not authorized to perform this action.", show_alert=True)
+        return
+
+    await query.answer()
+
+    data = query.data
+
+    if data == "blacklist_clear_confirm":
+        # Check if confirmation is pending
+        if not context.user_data.get('pending_blacklist_clear'):
+            await query.message.edit_text("⚠️ This confirmation has expired. Please run the command again.")
+            return
+
+        # Clear the blacklist
+        count = await db.clear_blacklist()
+        context.user_data['pending_blacklist_clear'] = False
+
+        await query.message.edit_text(
+            t("blacklist_cleared", "✅ Blacklist cleared. Removed {count} user(s).", count=count)
+        )
+        logger.info(f"Blacklist cleared by moderator {query.from_user.id}, removed {count} users")
+
+    elif data == "blacklist_clear_cancel":
+        context.user_data['pending_blacklist_clear'] = False
+        await query.message.edit_text(
+            t("blacklist_clear_cancelled", "❌ Blacklist clear cancelled.")
+        )
+
+
 async def handle_non_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle non-video messages."""
     if update.message.chat.type == "private":
@@ -1054,6 +1276,7 @@ def main():
     # Register handlers
     application.add_handler(CommandHandler("start", start_command))
     application.add_handler(CommandHandler("a", approve_all_command))
+    application.add_handler(CommandHandler("b", blacklist_command))
     application.add_handler(MessageHandler(filters.VIDEO & filters.ChatType.PRIVATE, handle_video))
     application.add_handler(MessageHandler(filters.ChatType.PRIVATE & ~filters.VIDEO & ~filters.COMMAND, handle_non_video))
     application.add_handler(CallbackQueryHandler(handle_publication_choice, pattern=r"^pub_"))
@@ -1064,6 +1287,8 @@ def main():
     application.add_handler(CallbackQueryHandler(handle_schedule_time, pattern=r"^schedtime_"))
     application.add_handler(CallbackQueryHandler(handle_schedule_time, pattern=r"^schedback_"))
     application.add_handler(CallbackQueryHandler(handle_schedule_time, pattern=r"^sched_"))
+    # Blacklist handlers
+    application.add_handler(CallbackQueryHandler(handle_blacklist_clear_confirmation, pattern=r"^blacklist_clear_"))
 
     # Start bot
     logger.info("Bot starting...")

@@ -38,5 +38,19 @@
   "button_quick_schedule": "⚡ Quick Schedule",
   "button_choose_date": "📅 Choose Date",
   "button_cancel": "❌ Cancel",
-  "button_back": "⬅️ Back"
+  "button_back": "⬅️ Back",
+  "button_confirm": "✅ Confirm",
+
+  "user_blacklisted": "❌ You are not allowed to submit videos.",
+  "blacklist_empty": "📋 Blacklist is empty.",
+  "blacklist_header": "📋 *Blacklisted Users:*\n",
+  "blacklist_user_added": "✅ User `{user_id}` added to blacklist.",
+  "blacklist_user_updated": "✅ User `{user_id}` blacklist entry updated.",
+  "blacklist_user_removed": "✅ User `{user_id}` removed from blacklist.",
+  "blacklist_user_not_found": "ℹ️ User `{user_id}` was not in the blacklist.",
+  "blacklist_invalid_user_id": "❌ Invalid user ID. Please provide a numeric user ID.",
+  "blacklist_clear_all_confirm": "⚠️ *WARNING*: This will remove ALL users from the blacklist.\n\nAre you sure?",
+  "blacklist_cleared": "✅ Blacklist cleared. Removed {count} user(s).",
+  "blacklist_clear_cancelled": "❌ Blacklist clear cancelled.",
+  "blacklist_usage": "❌ Invalid syntax.\n\n*Usage:*\n`/b` - Show blacklist\n`/b <user_id>` - Add user\n`/b clear <user_id>` - Remove user\n`/b clear all` - Clear all"
 }

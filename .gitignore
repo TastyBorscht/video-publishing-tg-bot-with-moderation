@@ -43,3 +43,10 @@ env/
 # Logs
 *.log
 logs/
+
+# Docker data directory (contains database)
+data/
+
+# OS-specific
+.DS_Store
+Thumbs.db

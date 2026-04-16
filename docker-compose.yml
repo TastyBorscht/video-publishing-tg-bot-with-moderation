@@ -1,0 +1,42 @@
+version: '3.8'
+
+services:
+  publisher_bot:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: publisher_bot
+    restart: unless-stopped
+
+    # Mount configuration files from the same directory as docker-compose.yml
+    volumes:
+      # Configuration files (read-only)
+      - ./.env:/app/.env:ro
+      - ./localization.json:/app/localization.json:ro
+
+      # Database persistence (read-write)
+      - ./data:/app/data
+
+    # Environment variables (can be overridden by .env file)
+    environment:
+      - DATABASE_PATH=/app/data/bot_database.db
+
+    # Logging configuration
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+    # Health check (optional)
+    healthcheck:
+      test: ["CMD", "python", "-c", "import os; os.path.exists('/app/data/bot_database.db')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+# Create named volume for data persistence (optional alternative to bind mount)
+volumes:
+  bot_data:
+    driver: local

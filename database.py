@@ -47,6 +47,17 @@ class Database:
             )
         """)
 
+        # Create blacklist table
+        await self.db.execute("""
+            CREATE TABLE IF NOT EXISTS blacklist (
+                user_id INTEGER PRIMARY KEY,
+                username TEXT,
+                added_by INTEGER NOT NULL,
+                added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                reason TEXT
+            )
+        """)
+
         # Create indexes for performance
         await self.db.execute(
             "CREATE INDEX IF NOT EXISTS idx_status ON videos(status)"
@@ -207,3 +218,59 @@ class Database:
         )
         row = await cursor.fetchone()
         return dict(row) if row else None
+
+    # ============================================================================
+    # Blacklist methods
+    # ============================================================================
+
+    async def is_blacklisted(self, user_id: int) -> bool:
+        """Check if a user is blacklisted."""
+        cursor = await self.db.execute(
+            "SELECT 1 FROM blacklist WHERE user_id = ?",
+            (user_id,)
+        )
+        row = await cursor.fetchone()
+        return row is not None
+
+    async def add_to_blacklist(
+        self,
+        user_id: int,
+        added_by: int,
+        username: Optional[str] = None,
+        reason: Optional[str] = None
+    ) -> None:
+        """Add a user to the blacklist."""
+        await self.db.execute(
+            """
+            INSERT OR REPLACE INTO blacklist (user_id, username, added_by, reason)
+            VALUES (?, ?, ?, ?)
+            """,
+            (user_id, username, added_by, reason)
+        )
+        await self.db.commit()
+
+    async def remove_from_blacklist(self, user_id: int) -> bool:
+        """Remove a user from the blacklist. Returns True if user was blacklisted."""
+        cursor = await self.db.execute(
+            "DELETE FROM blacklist WHERE user_id = ?",
+            (user_id,)
+        )
+        await self.db.commit()
+        return cursor.rowcount > 0
+
+    async def clear_blacklist(self) -> int:
+        """Clear the entire blacklist. Returns number of users removed."""
+        cursor = await self.db.execute("DELETE FROM blacklist")
+        await self.db.commit()
+        return cursor.rowcount
+
+    async def get_blacklist(self) -> List[Dict[str, Any]]:
+        """Get all blacklisted users."""
+        cursor = await self.db.execute(
+            """
+            SELECT * FROM blacklist
+            ORDER BY added_at DESC
+            """
+        )
+        rows = await cursor.fetchall()
+        return [dict(row) for row in rows]
