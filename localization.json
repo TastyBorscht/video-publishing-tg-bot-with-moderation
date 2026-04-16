@@ -4,7 +4,7 @@
   "welcome_message": "Welcome to the Video Submission Bot!\n\nSend me a video to submit it for publication.",
   "send_video_prompt": "Please send a video file",
 
-  "choose_publication_type": "Как запостить твой кринж?:",
+  "choose_publication_type": "Choose publication type:",
   "video_sent_to_moderation": "Your video has been sent.",
 
   "video_approved_queued": "Your video has been approved and added to the publication queue.",
