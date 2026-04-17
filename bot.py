@@ -65,17 +65,79 @@ async def handle_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
         logger.info(f"Blacklisted user {user.id} attempted to submit video")
         return
 
+    # Check if user has hidden username (only check @username, not first_name)
+    # Users with privacy settings hide their @username
+    username = user.username or user.first_name
+    has_hidden_username = not user.username or user.username.strip() == ""
+
+    logger.info(f"User {user.id}: username={user.username}, first_name={user.first_name}, has_hidden_username={has_hidden_username}")
+
     # Store video in database with pending status
     video_id = await db.insert_video(
         file_id=video.file_id,
         user_id=user.id,
-        username=user.username or user.first_name,
-        is_anonymous=False,  # Will be updated based on button click
+        username=username,
+        is_anonymous=has_hidden_username,  # Auto-anonymous if username is hidden
         status="pending",
         user_message_id=update.message.message_id
     )
 
-    # Create inline buttons for user choice
+    # If username is hidden, automatically submit as anonymous
+    if has_hidden_username:
+        await db.update_status(video_id, "pending", is_anonymous=True)
+
+        # Prepare caption for moderation
+        caption = t("caption_hidden_username", "FROM HIDDEN NICKNAME")
+        moderation_caption = f"{caption}\n\n👤 User ID: {user.id}"
+
+        # Send to moderation group
+        try:
+            sent_message = await context.bot.send_video(
+                chat_id=config.MODERATION_GROUP_ID,
+                video=video.file_id,
+                caption=moderation_caption
+            )
+
+            # Add moderation buttons
+            keyboard = [
+                [
+                    InlineKeyboardButton(t("button_approve", "Approve"), callback_data=f"mod_approve_{video_id}"),
+                    InlineKeyboardButton(t("button_reject", "Reject"), callback_data=f"mod_reject_{video_id}")
+                ],
+                [
+                    InlineKeyboardButton(t("button_schedule", "Schedule"), callback_data=f"mod_schedule_{video_id}"),
+                    InlineKeyboardButton(t("button_publish_now", "Publish now"), callback_data=f"mod_publish_{video_id}")
+                ]
+            ]
+            reply_markup = InlineKeyboardMarkup(keyboard)
+
+            await context.bot.edit_message_reply_markup(
+                chat_id=config.MODERATION_GROUP_ID,
+                message_id=sent_message.message_id,
+                reply_markup=reply_markup
+            )
+
+            # Update database
+            await db.update_status(
+                video_id,
+                "pending",
+                moderation_message_id=sent_message.message_id,
+                file_id=sent_message.video.file_id
+            )
+
+            # Confirm to user
+            await context.bot.send_message(
+                chat_id=user.id,
+                text=t("video_sent_to_moderation", "Your video has been sent.")
+            )
+
+            logger.info(f"Video {video_id} from user with hidden username auto-submitted anonymously")
+        except TelegramError as e:
+            logger.error(f"Error sending video to moderation: {e}")
+            await update.message.reply_text(t("error_sending_to_moderation", "Error sending video to moderation. Please try again."))
+        return
+
+    # Create inline buttons for user choice (normal flow)
     keyboard = [
         [
             InlineKeyboardButton(t("button_publish_publicly", "Publish publicly"), callback_data=f"pub_public_{video_id}"),
@@ -107,7 +169,7 @@ async def handle_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def timeout_video_submission(context: ContextTypes.DEFAULT_TYPE):
-    """Delete video and button messages after timeout."""
+    """Delete button message after timeout (keep video)."""
     job_data = context.job.data
     chat_id = job_data["chat_id"]
     video_id = job_data["video_id"]
@@ -116,16 +178,12 @@ async def timeout_video_submission(context: ContextTypes.DEFAULT_TYPE):
     video = await db.get_video_by_id(video_id)
     if video and video["status"] == "pending":
         try:
-            # Delete messages
-            await context.bot.delete_message(
-                chat_id=chat_id,
-                message_id=job_data["video_message_id"]
-            )
+            # Delete only the button message (keep the video)
             await context.bot.delete_message(
                 chat_id=chat_id,
                 message_id=job_data["button_message_id"]
             )
-            # Delete or update database record
+            # Delete database record
             await db.delete_video(video_id)
             logger.info(f"Timeout: Deleted video {video_id} due to no response")
         except TelegramError as e:
@@ -165,15 +223,14 @@ async def handle_publication_choice(update: Update, context: ContextTypes.DEFAUL
         caption = f"Video from user {username}"
 
     # Add user ID for moderators (visible only in moderation group)
-    moderation_caption = f"{caption}\n\n👤 User ID: `{video['user_id']}`"
+    moderation_caption = f"{caption}\n\n👤 User ID: {video['user_id']}"
 
     # Forward to moderation group
     try:
         sent_message = await context.bot.send_video(
             chat_id=config.MODERATION_GROUP_ID,
             video=video["file_id"],
-            caption=moderation_caption,
-            parse_mode='Markdown'
+            caption=moderation_caption
         )
 
         # Add moderation buttons
@@ -209,11 +266,7 @@ async def handle_publication_choice(update: Update, context: ContextTypes.DEFAUL
             text=t("video_sent_to_moderation", "Your video has been sent.")
         )
 
-        # Delete original messages
-        await context.bot.delete_message(
-            chat_id=query.message.chat_id,
-            message_id=video["user_message_id"]
-        )
+        # Delete only the button message (keep the video)
         await query.message.delete()
 
         logger.info(f"Video {video_id} sent to moderation group")
@@ -311,30 +364,33 @@ async def moderate_edit_cancel(query, context: ContextTypes.DEFAULT_TYPE, video:
             caption_base = t("caption_anonymous_user", "Video from anonymous user")
         else:
             username = video["username"]
-            if username and not username.startswith("@"):
-                username = f"@{username}"
-            caption_base = f"Video from user {username}"
+            # Check if username is hidden
+            if not username or username.strip() == "":
+                caption_base = t("caption_hidden_username", "FROM HIDDEN NICKNAME")
+            else:
+                if not username.startswith("@"):
+                    username = f"@{username}"
+                caption_base = f"Video from user {username}"
 
         # Add user ID for moderators
-        moderation_caption = f"{caption_base}\n\n👤 User ID: `{video['user_id']}`"
+        moderation_caption = f"{caption_base}\n\n👤 User ID: {video['user_id']}"
 
         # Restore original moderation buttons
         keyboard = [
             [
-                InlineKeyboardButton("Approve", callback_data=f"mod_approve_{video_id}"),
-                InlineKeyboardButton("Reject", callback_data=f"mod_reject_{video_id}")
+                InlineKeyboardButton(t("button_approve", "Approve"), callback_data=f"mod_approve_{video_id}"),
+                InlineKeyboardButton(t("button_reject", "Reject"), callback_data=f"mod_reject_{video_id}")
             ],
             [
-                InlineKeyboardButton("Schedule", callback_data=f"mod_schedule_{video_id}"),
-                InlineKeyboardButton("Publish now", callback_data=f"mod_publish_{video_id}")
+                InlineKeyboardButton(t("button_schedule", "Schedule"), callback_data=f"mod_schedule_{video_id}"),
+                InlineKeyboardButton(t("button_publish_now", "Publish now"), callback_data=f"mod_publish_{video_id}")
             ]
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
 
         await query.message.edit_caption(
             caption=moderation_caption,
-            reply_markup=reply_markup,
-            parse_mode='Markdown'
+            reply_markup=reply_markup
         )
 
         logger.info(f"Video {video_id} reset to pending - returned to moderation menu")
@@ -669,27 +725,30 @@ async def handle_schedule_time(update: Update, context: ContextTypes.DEFAULT_TYP
             caption_base = t("caption_anonymous_user", "Video from anonymous user")
         else:
             username = video["username"]
-            if username and not username.startswith("@"):
-                username = f"@{username}"
-            caption_base = f"Video from user {username}"
+            # Check if username is hidden
+            if not username or username.strip() == "":
+                caption_base = t("caption_hidden_username", "FROM HIDDEN NICKNAME")
+            else:
+                if not username.startswith("@"):
+                    username = f"@{username}"
+                caption_base = f"Video from user {username}"
 
         # Add User ID and scheduled time
         moderation_caption = (
             f"{caption_base}\n\n"
-            f"👤 User ID: `{video['user_id']}`\n\n"
+            f"👤 User ID: {video['user_id']}\n\n"
             f"📅 Scheduled for: {scheduled_time.strftime('%Y-%m-%d %H:%M %Z')}"
         )
 
         # Add Edit/Cancel button
-        keyboard = [[InlineKeyboardButton("🔄 Edit/Cancel", callback_data=f"mod_edit_{video_id}")]]
+        keyboard = [[InlineKeyboardButton(t("button_edit_cancel", "🔄 Edit/Cancel"), callback_data=f"mod_edit_{video_id}")]]
         reply_markup = InlineKeyboardMarkup(keyboard)
 
         await context.bot.edit_message_caption(
             chat_id=config.MODERATION_GROUP_ID,
             message_id=video["moderation_message_id"],
             caption=moderation_caption,
-            reply_markup=reply_markup,
-            parse_mode='Markdown'
+            reply_markup=reply_markup
         )
 
         # Delete schedule menu
@@ -841,9 +900,13 @@ async def publish_video_to_channel(
                 caption = t("caption_anonymous_user", "Video from anonymous user")
             else:
                 username = video["username"]
-                if username and not username.startswith("@"):
-                    username = f"@{username}"
-                caption = f"Video from user {username}"
+                # Check if username is hidden
+                if not username or username.strip() == "":
+                    caption = t("caption_hidden_username", "FROM HIDDEN NICKNAME")
+                else:
+                    if not username.startswith("@"):
+                        username = f"@{username}"
+                    caption = f"Video from user {username}"
 
             # Send video to target channel
             await context.bot.send_video(
@@ -999,9 +1062,13 @@ async def approve_all_command(update: Update, context: ContextTypes.DEFAULT_TYPE
                     caption_base = t("caption_anonymous_user", "Video from anonymous user")
                 else:
                     username = video["username"]
-                    if username and not username.startswith("@"):
-                        username = f"@{username}"
-                    caption_base = f"Video from user {username}"
+                    # Check if username is hidden
+                    if not username or username.strip() == "":
+                        caption_base = t("caption_hidden_username", "FROM HIDDEN NICKNAME")
+                    else:
+                        if not username.startswith("@"):
+                            username = f"@{username}"
+                        caption_base = f"Video from user {username}"
 
                 await context.bot.edit_message_caption(
                     chat_id=config.MODERATION_GROUP_ID,
