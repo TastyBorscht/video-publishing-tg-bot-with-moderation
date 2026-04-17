@@ -78,8 +78,8 @@ async def handle_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Create inline buttons for user choice
     keyboard = [
         [
-            InlineKeyboardButton("Publish publicly", callback_data=f"pub_public_{video_id}"),
-            InlineKeyboardButton("Publish anonymously", callback_data=f"pub_anon_{video_id}")
+            InlineKeyboardButton(t("button_publish_publicly", "Publish publicly"), callback_data=f"pub_public_{video_id}"),
+            InlineKeyboardButton(t("button_publish_anonymously", "Publish anonymously"), callback_data=f"pub_anon_{video_id}")
         ]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
@@ -148,7 +148,7 @@ async def handle_publication_choice(update: Update, context: ContextTypes.DEFAUL
     # Get video from database
     video = await db.get_video_by_id(video_id)
     if not video or video["status"] != "pending":
-        await query.answer("This video has already been processed or timed out", show_alert=True)
+        await query.answer(t("error_video_processed_or_timeout", "This video has already been processed or timed out"), show_alert=True)
         return
 
     # Update anonymity status
@@ -157,7 +157,7 @@ async def handle_publication_choice(update: Update, context: ContextTypes.DEFAUL
 
     # Prepare caption for moderation group (includes user ID)
     if is_anonymous:
-        caption = "Video from anonymous user"
+        caption = t("caption_anonymous_user", "Video from anonymous user")
     else:
         username = video["username"]
         if username and not username.startswith("@"):
@@ -179,12 +179,12 @@ async def handle_publication_choice(update: Update, context: ContextTypes.DEFAUL
         # Add moderation buttons
         keyboard = [
             [
-                InlineKeyboardButton("Approve", callback_data=f"mod_approve_{video_id}"),
-                InlineKeyboardButton("Reject", callback_data=f"mod_reject_{video_id}")
+                InlineKeyboardButton(t("button_approve", "Approve"), callback_data=f"mod_approve_{video_id}"),
+                InlineKeyboardButton(t("button_reject", "Reject"), callback_data=f"mod_reject_{video_id}")
             ],
             [
-                InlineKeyboardButton("Schedule", callback_data=f"mod_schedule_{video_id}"),
-                InlineKeyboardButton("Publish now", callback_data=f"mod_publish_{video_id}")
+                InlineKeyboardButton(t("button_schedule", "Schedule"), callback_data=f"mod_schedule_{video_id}"),
+                InlineKeyboardButton(t("button_publish_now", "Publish now"), callback_data=f"mod_publish_{video_id}")
             ]
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
@@ -220,7 +220,7 @@ async def handle_publication_choice(update: Update, context: ContextTypes.DEFAUL
 
     except TelegramError as e:
         logger.error(f"Error sending video to moderation group: {e}")
-        await query.answer("Error sending video to moderation. Please try again.", show_alert=True)
+        await query.answer(t("error_sending_to_moderation", "Error sending video to moderation. Please try again."), show_alert=True)
 
 
 # ============================================================================
@@ -244,7 +244,7 @@ async def handle_moderation_action(update: Update, context: ContextTypes.DEFAULT
     # CRITICAL SECURITY CHECKS
     if not is_moderator(query.from_user.id, query.message.chat_id):
         await query.answer(
-            "You are not authorized to perform this action.",
+            t("error_unauthorized_action", "You are not authorized to perform this action."),
             show_alert=True
         )
         return
@@ -261,7 +261,7 @@ async def handle_moderation_action(update: Update, context: ContextTypes.DEFAULT
     # Get video from database
     video = await db.get_video_by_id(video_id)
     if not video:
-        await query.answer("Video not found in database", show_alert=True)
+        await query.answer(t("error_video_not_found", "Video not found in database"), show_alert=True)
         return
 
     # Check if already processed (allow edit for queued/scheduled)
@@ -308,7 +308,7 @@ async def moderate_edit_cancel(query, context: ContextTypes.DEFAULT_TYPE, video:
 
         # Get the original caption (remove status messages, keep user ID)
         if video['is_anonymous']:
-            caption_base = "Video from anonymous user"
+            caption_base = t("caption_anonymous_user", "Video from anonymous user")
         else:
             username = video["username"]
             if username and not username.startswith("@"):
@@ -462,7 +462,7 @@ async def handle_schedule_menu(update: Update, context: ContextTypes.DEFAULT_TYP
 
     # CRITICAL SECURITY CHECKS
     if not is_moderator(query.from_user.id, query.message.chat_id):
-        await query.answer("You are not authorized to perform this action.", show_alert=True)
+        await query.answer(t("error_unauthorized_action", "You are not authorized to perform this action."), show_alert=True)
         return
 
     data = query.data
@@ -534,7 +534,7 @@ async def handle_schedule_date(update: Update, context: ContextTypes.DEFAULT_TYP
 
     # CRITICAL SECURITY CHECKS
     if not is_moderator(query.from_user.id, query.message.chat_id):
-        await query.answer("You are not authorized to perform this action.", show_alert=True)
+        await query.answer(t("error_unauthorized_action", "You are not authorized to perform this action."), show_alert=True)
         return
 
     data = query.data
@@ -582,7 +582,7 @@ async def handle_schedule_time(update: Update, context: ContextTypes.DEFAULT_TYP
     # CRITICAL SECURITY CHECKS
     if not is_moderator(query.from_user.id, query.message.chat_id):
         await query.answer(
-            "You are not authorized to perform this action.",
+            t("error_unauthorized_action", "You are not authorized to perform this action."),
             show_alert=True
         )
         return
@@ -617,7 +617,7 @@ async def handle_schedule_time(update: Update, context: ContextTypes.DEFAULT_TYP
 
         # If the time is in the past today, show error
         if scheduled_time <= now:
-            await query.answer("Selected time is in the past. Please choose a future time.", show_alert=True)
+            await query.answer(t("error_time_in_past", "Selected time is in the past. Please choose a future time."), show_alert=True)
             return
 
         hours_str = None  # Will use scheduled_time directly
@@ -631,7 +631,7 @@ async def handle_schedule_time(update: Update, context: ContextTypes.DEFAULT_TYP
     # Get video from database
     video = await db.get_video_by_id(video_id)
     if not video:
-        await query.answer("Video not found in database", show_alert=True)
+        await query.answer(t("error_video_not_found", "Video not found in database"), show_alert=True)
         return
 
     # Check if already processed
@@ -666,7 +666,7 @@ async def handle_schedule_time(update: Update, context: ContextTypes.DEFAULT_TYP
         # Update moderation message caption (keep User ID)
         # Get the current caption from the video record
         if video['is_anonymous']:
-            caption_base = "Video from anonymous user"
+            caption_base = t("caption_anonymous_user", "Video from anonymous user")
         else:
             username = video["username"]
             if username and not username.startswith("@"):
@@ -699,7 +699,8 @@ async def handle_schedule_time(update: Update, context: ContextTypes.DEFAULT_TYP
         try:
             await context.bot.send_message(
                 chat_id=video["user_id"],
-                text=f"Your video has been scheduled for publication on {scheduled_time.strftime('%Y-%m-%d at %H:%M %Z')}."
+                text=t("video_scheduled_notification", "Your video has been scheduled for publication on {scheduled_time}.",
+                      scheduled_time=scheduled_time.strftime('%Y-%m-%d at %H:%M %Z'))
             )
         except TelegramError as e:
             logger.error(f"Failed to notify user {video['user_id']}: {e}")
@@ -707,7 +708,7 @@ async def handle_schedule_time(update: Update, context: ContextTypes.DEFAULT_TYP
         logger.info(f"Video {video_id} scheduled for {scheduled_time}")
     except Exception as e:
         logger.error(f"Error scheduling video {video_id}: {e}")
-        await query.message.edit_text(f"❌ Error scheduling video: {str(e)}")
+        await query.message.edit_text(t("error_scheduling_video", "❌ Error scheduling video: {error}", error=str(e)))
 
 
 async def moderate_publish_now(query, context: ContextTypes.DEFAULT_TYPE, video: dict):
@@ -811,7 +812,7 @@ async def publish_from_queue(context: ContextTypes.DEFAULT_TYPE):
         try:
             await context.bot.send_message(
                 chat_id=video["user_id"],
-                text="Your video has been published."
+                text=t("video_published", "Your video has been published.")
             )
         except TelegramError as e:
             logger.error(f"Failed to notify user {video['user_id']}: {e}")
@@ -837,7 +838,7 @@ async def publish_video_to_channel(
         try:
             # Determine caption
             if video["is_anonymous"]:
-                caption = "Video from anonymous user"
+                caption = t("caption_anonymous_user", "Video from anonymous user")
             else:
                 username = video["username"]
                 if username and not username.startswith("@"):
@@ -995,7 +996,7 @@ async def approve_all_command(update: Update, context: ContextTypes.DEFAULT_TYPE
 
                 # Get the original caption
                 if video['is_anonymous']:
-                    caption_base = "Video from anonymous user"
+                    caption_base = t("caption_anonymous_user", "Video from anonymous user")
                 else:
                     username = video["username"]
                     if username and not username.startswith("@"):
@@ -1013,7 +1014,7 @@ async def approve_all_command(update: Update, context: ContextTypes.DEFAULT_TYPE
                 try:
                     await context.bot.send_message(
                         chat_id=video["user_id"],
-                        text="Your video has been approved and added to the publication queue."
+                        text=t("video_approved_queued", "Your video has been approved and added to the publication queue.")
                     )
                 except TelegramError as e:
                     logger.error(f"Failed to notify user {video['user_id']}: {e}")
@@ -1180,7 +1181,7 @@ async def handle_blacklist_clear_confirmation(update: Update, context: ContextTy
 
     # CRITICAL SECURITY CHECKS
     if not is_moderator(query.from_user.id, query.message.chat_id):
-        await query.answer("You are not authorized to perform this action.", show_alert=True)
+        await query.answer(t("error_unauthorized_action", "You are not authorized to perform this action."), show_alert=True)
         return
 
     await query.answer()
