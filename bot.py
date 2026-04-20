@@ -65,6 +65,21 @@ async def handle_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
         logger.info(f"Blacklisted user {user.id} attempted to submit video")
         return
 
+    # Check for duplicate video using file_unique_id
+    file_unique_id = video.file_unique_id
+    duplicate = await db.check_duplicate_video(file_unique_id)
+    if duplicate:
+        status_map = {
+            "pending": t("duplicate_pending", "This video is already pending moderation."),
+            "queued": t("duplicate_queued", "This video has already been approved and is queued for publication."),
+            "scheduled": t("duplicate_scheduled", "This video has already been scheduled for publication."),
+            "published": t("duplicate_published", "This video has already been published.")
+        }
+        message = status_map.get(duplicate["status"], t("duplicate_exists", "This video has already been submitted."))
+        await update.message.reply_text(f"❌ {message}")
+        logger.info(f"User {user.id} attempted to submit duplicate video (file_unique_id={file_unique_id}, status={duplicate['status']})")
+        return
+
     # Check if user has hidden username (only check @username, not first_name)
     # Users with privacy settings hide their @username
     username = user.username or user.first_name
@@ -75,6 +90,7 @@ async def handle_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Store video in database with pending status
     video_id = await db.insert_video(
         file_id=video.file_id,
+        file_unique_id=file_unique_id,
         user_id=user.id,
         username=username,
         is_anonymous=has_hidden_username,  # Auto-anonymous if username is hidden
@@ -220,7 +236,7 @@ async def handle_publication_choice(update: Update, context: ContextTypes.DEFAUL
         username = video["username"]
         if username and not username.startswith("@"):
             username = f"@{username}" if username else username
-        caption = f"Video from user {username}"
+        caption = t("caption_video_from_user", "Video from user {username}", username=username)
 
     # Add user ID for moderators (visible only in moderation group)
     moderation_caption = f"{caption}\n\n👤 User ID: {video['user_id']}"
@@ -370,7 +386,7 @@ async def moderate_edit_cancel(query, context: ContextTypes.DEFAULT_TYPE, video:
             else:
                 if not username.startswith("@"):
                     username = f"@{username}"
-                caption_base = f"Video from user {username}"
+                caption_base = t("caption_video_from_user", "Video from user {username}", username=username)
 
         # Add user ID for moderators
         moderation_caption = f"{caption_base}\n\n👤 User ID: {video['user_id']}"
@@ -731,7 +747,7 @@ async def handle_schedule_time(update: Update, context: ContextTypes.DEFAULT_TYP
             else:
                 if not username.startswith("@"):
                     username = f"@{username}"
-                caption_base = f"Video from user {username}"
+                caption_base = t("caption_video_from_user", "Video from user {username}", username=username)
 
         # Add User ID and scheduled time
         moderation_caption = (
@@ -906,7 +922,7 @@ async def publish_video_to_channel(
                 else:
                     if not username.startswith("@"):
                         username = f"@{username}"
-                    caption = f"Video from user {username}"
+                    caption = t("caption_video_from_user", "Video from user {username}", username=username)
 
             # Send video to target channel
             await context.bot.send_video(
@@ -1068,7 +1084,7 @@ async def approve_all_command(update: Update, context: ContextTypes.DEFAULT_TYPE
                     else:
                         if not username.startswith("@"):
                             username = f"@{username}"
-                        caption_base = f"Video from user {username}"
+                        caption_base = t("caption_video_from_user", "Video from user {username}", username=username)
 
                 await context.bot.edit_message_caption(
                     chat_id=config.MODERATION_GROUP_ID,

@@ -34,6 +34,7 @@ class Database:
             CREATE TABLE IF NOT EXISTS videos (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 file_id TEXT NOT NULL,
+                file_unique_id TEXT,
                 user_id INTEGER NOT NULL,
                 username TEXT,
                 is_anonymous BOOLEAN NOT NULL,
@@ -68,6 +69,9 @@ class Database:
         await self.db.execute(
             "CREATE INDEX IF NOT EXISTS idx_created_at ON videos(created_at)"
         )
+        await self.db.execute(
+            "CREATE INDEX IF NOT EXISTS idx_file_unique_id ON videos(file_unique_id)"
+        )
 
         await self.db.commit()
         logger.info("Database tables and indexes created/verified")
@@ -79,16 +83,17 @@ class Database:
         username: Optional[str],
         is_anonymous: bool,
         status: str = "pending",
-        user_message_id: Optional[int] = None
+        user_message_id: Optional[int] = None,
+        file_unique_id: Optional[str] = None
     ) -> int:
         """Insert a new video submission. Returns the video ID."""
         cursor = await self.db.execute(
             """
             INSERT INTO videos
-            (file_id, user_id, username, is_anonymous, status, user_message_id)
-            VALUES (?, ?, ?, ?, ?, ?)
+            (file_id, file_unique_id, user_id, username, is_anonymous, status, user_message_id)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
             """,
-            (file_id, user_id, username, is_anonymous, status, user_message_id)
+            (file_id, file_unique_id, user_id, username, is_anonymous, status, user_message_id)
         )
         await self.db.commit()
         return cursor.lastrowid
@@ -274,3 +279,33 @@ class Database:
         )
         rows = await cursor.fetchall()
         return [dict(row) for row in rows]
+
+    async def check_duplicate_video(self, file_unique_id: str) -> Optional[Dict[str, Any]]:
+        """Check if a video with this file_unique_id already exists (not rejected/failed)."""
+        cursor = await self.db.execute(
+            """
+            SELECT * FROM videos
+            WHERE file_unique_id = ?
+            AND status NOT IN ('rejected', 'failed')
+            ORDER BY created_at DESC
+            LIMIT 1
+            """,
+            (file_unique_id,)
+        )
+        row = await cursor.fetchone()
+        return dict(row) if row else None
+
+    async def check_duplicate_video(self, file_unique_id: str) -> Optional[Dict[str, Any]]:
+        """Check if a video with this file_unique_id already exists (not rejected/failed)."""
+        cursor = await self.db.execute(
+            """
+            SELECT * FROM videos
+            WHERE file_unique_id = ?
+            AND status NOT IN ('rejected', 'failed')
+            ORDER BY created_at DESC
+            LIMIT 1
+            """,
+            (file_unique_id,)
+        )
+        row = await cursor.fetchone()
+        return dict(row) if row else None

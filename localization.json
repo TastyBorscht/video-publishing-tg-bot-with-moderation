@@ -31,6 +31,8 @@
   "button_publish_publicly": "Public",
   "button_publish_anonymously": "Anonymous",
   "caption_anonymous_user": "Video from anonymous user",
+  "caption_hidden_username": "VIDEO FROM HIDDEN USERNAME",
+  "caption_video_from_user": "Video from {username}",
   "button_approve": "Approve",
   "button_reject": "Reject",
   "button_schedule": "Schedule",
@@ -62,5 +64,11 @@
   "blacklist_clear_all_confirm": "⚠️ *WARNING*: This will remove ALL users from the blacklist.\n\nAre you sure?",
   "blacklist_cleared": "✅ Blacklist cleared. Removed {count} user(s).",
   "blacklist_clear_cancelled": "❌ Blacklist clear cancelled.",
-  "blacklist_usage": "❌ Invalid syntax.\n\n*Usage:*\n`/b` — show blacklist\n`/b <user_id>` — add user\n`/b clear <user_id>` — remove user\n`/b clear all` — clear all"
+  "blacklist_usage": "❌ Invalid syntax.\n\n*Usage:*\n`/b` — show blacklist\n`/b <user_id>` — add user\n`/b clear <user_id>` — remove user\n`/b clear all` — clear all",
+
+  "duplicate_pending": "This video is already pending moderation.",
+  "duplicate_queued": "This video has already been approved and is queued for publication.",
+  "duplicate_scheduled": "This video has already been scheduled for publication.",
+  "duplicate_published": "This video has already been published.",
+  "duplicate_exists": "This video has already been submitted."
 }
