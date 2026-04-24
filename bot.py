@@ -236,7 +236,7 @@ async def handle_publication_choice(update: Update, context: ContextTypes.DEFAUL
         username = video["username"]
         if username and not username.startswith("@"):
             username = f"@{username}" if username else username
-        caption = t("caption_video_from_user", "Video from user {username}", username=username)
+        caption = t("caption_video_from_user", "Video from {username}", username=username)
 
     # Add user ID for moderators (visible only in moderation group)
     moderation_caption = f"{caption}\n\n👤 User ID: {video['user_id']}"
@@ -386,7 +386,7 @@ async def moderate_edit_cancel(query, context: ContextTypes.DEFAULT_TYPE, video:
             else:
                 if not username.startswith("@"):
                     username = f"@{username}"
-                caption_base = t("caption_video_from_user", "Video from user {username}", username=username)
+                caption_base = t("caption_video_from_user", "Video from {username}", username=username)
 
         # Add user ID for moderators
         moderation_caption = f"{caption_base}\n\n👤 User ID: {video['user_id']}"
@@ -747,7 +747,7 @@ async def handle_schedule_time(update: Update, context: ContextTypes.DEFAULT_TYP
             else:
                 if not username.startswith("@"):
                     username = f"@{username}"
-                caption_base = t("caption_video_from_user", "Video from user {username}", username=username)
+                caption_base = t("caption_video_from_user", "Video from {username}", username=username)
 
         # Add User ID and scheduled time
         moderation_caption = (
@@ -922,7 +922,7 @@ async def publish_video_to_channel(
                 else:
                     if not username.startswith("@"):
                         username = f"@{username}"
-                    caption = t("caption_video_from_user", "Video from user {username}", username=username)
+                    caption = t("caption_video_from_user", "Video from {username}", username=username)
 
             # Send video to target channel
             await context.bot.send_video(
@@ -1084,7 +1084,7 @@ async def approve_all_command(update: Update, context: ContextTypes.DEFAULT_TYPE
                     else:
                         if not username.startswith("@"):
                             username = f"@{username}"
-                        caption_base = t("caption_video_from_user", "Video from user {username}", username=username)
+                        caption_base = t("caption_video_from_user", "Video from {username}", username=username)
 
                 await context.bot.edit_message_caption(
                     chat_id=config.MODERATION_GROUP_ID,
